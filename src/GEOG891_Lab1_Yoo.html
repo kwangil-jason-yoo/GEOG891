@@ -624,7 +624,7 @@ task3(c(1, 0, -1))</code></pre>
 <h3>Task 4: (slightly) more complex spatial analysis.</h3>
 <div id="calculate-the-number-of-monitoring-stations-in-each-state" class="section level4">
 <h4>4.1 Calculate the number of monitoring stations in each state</h4>
-<pre class="r"><code>sf::sf_use_s2(FALSE)</code></pre>
+<pre class="r"><code>sf::sf_use_s2(F)</code></pre>
 <pre><code>## Spherical geometry (s2) switched off</code></pre>
 <pre class="r"><code>all.stations &lt;- sf::st_intersection(d.stations, d.counties)</code></pre>
 <pre><code>## Warning: attribute variables are assumed to be spatially constant throughout all
@@ -772,7 +772,7 @@ head(s.highdrainage, 1)</code></pre>
 </div>
 <div id="what-did-you-find-challenging-in-this-lab-what-was-new" class="section level3">
 <h3>2. What did you find challenging in this lab? What was new?</h3>
-<p><br> Question 1.4 - At first, I was trying this code “d.stations %&gt;% mutate(length = min(nchar(STATION_NA)))”. However, the output shows that the minimum character count was applied to all counties. So, I searched on the web and found a way to use aggregate, which applies the function to the multiple columns. <br> Task 3 - It was challenging becuase I needed to put multiple functions and if statements all together in one function. <br> Task 4.1 - I was unable to use st_intersenct because of one geometry in the data. However, I found this code “sf::sf_use_s2(FALSE)” from the web, and the problem was solved. This sf_use_s2 was new to me, and I think I need more explanation about the code in addition to what the web explained: “sf_use_s2 returns the value of this variable before (re)setting it, invisibly if use_s2 is not missing.”</p>
+<p><br> Question 1.4 - At first, I was trying this code “d.stations %&gt;% mutate(length = min(nchar(STATION_NA)))”. However, the output shows that the minimum character count was applied to all counties. So, I searched on the web and found a way to use aggregate, which applies the function to the multiple columns. <br> Task 3 - It was challenging becuase I needed to put multiple functions and if statements all together in one function. <br> Task 4.1 - I was unable to use st_intersenct because of one geometry in the data. However, I found this code “sf::sf_use_s2(FALSE)” from the web, and the problem was solved. This sf_use_s2 was new to me, and I think I need more explanation about the code in addition to what the web explained: “sf_use_s2 returns the value of this variable before (re)setting it, invisibly if use_s2 is not missing.” <br> Additional information about sf_use_s2 <br> Switching between S2 and GEOS - Edzer Pebesma and Dewey Dunnington <br> <a href="https://cran.r-project.org/web/packages/sf/vignettes/sf7.html" class="uri">https://cran.r-project.org/web/packages/sf/vignettes/sf7.html</a> <br> sf_use_s2(FALSE) can switch between s2Geometry and GEOS - Geometry Engine, Open Source which “The two-dimensional R2 library that was formerly used by sf”. GEOS treats projected coordinates as planar (i.e. two points lie on a line of infinite max lenght) while s2 is the two points lie on a great circle of circumference of 40 075 kilometers.&quot;</p>
 </div>
 <div id="what-types-of-activities-would-you-like-to-see-in-labs-this-semester" class="section level3">
 <h3>3. What types of activities would you like to see in labs this semester?</h3>

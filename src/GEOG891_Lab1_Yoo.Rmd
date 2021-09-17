@@ -170,7 +170,7 @@ task3(c("a", "b", "c"))
 #### 4.1 Calculate the number of monitoring stations in each state
 
 ```{r}
-sf::sf_use_s2(FALSE)
+sf::sf_use_s2(F)
 all.stations <- sf::st_intersection(d.stations, d.counties)
 all.stations %>% group_by(STATEFP10) %>% mutate(count = n())
 all.stations %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(STATEFP10) %>% summarise(count = n())
@@ -234,6 +234,14 @@ Question 1.4 - At first, I was trying this code "d.stations %>% mutate(length = 
 Task 3 - It was challenging becuase I needed to put multiple functions and if statements all together in one function.
 <br>
 Task 4.1 - I was unable to use st_intersenct because of one geometry in the data. However, I found this code “sf::sf_use_s2(FALSE)” from the web, and the problem was solved. This sf_use_s2 was new to me, and I think I need more explanation about the code in addition to what the web explained: “sf_use_s2 returns the value of this variable before (re)setting it, invisibly if use_s2 is not missing.”
+<br>
+Additional information about sf_use_s2
+<br>
+Switching between S2 and GEOS - Edzer Pebesma and Dewey Dunnington
+<br>
+https://cran.r-project.org/web/packages/sf/vignettes/sf7.html
+<br>
+sf_use_s2(FALSE) can switch between s2Geometry and GEOS - Geometry Engine, Open Source which "The two-dimensional R2 library that was formerly used by sf." "GEOS treats projected coordinates as planar (i.e. two points lie on a line of infinite max lenght) while s2 is the two points lie on a great circle of circumference of 40 075 kilometers)."
 
 ### 3. What types of activities would you like to see in labs this semester?
 <br>
