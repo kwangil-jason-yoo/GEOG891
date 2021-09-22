@@ -191,10 +191,9 @@ ny.counties %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(station_St
 #### 4.3 Calculate which state has monitoring stations with the greatest average drainage area (Drainage_A)
 
 ```{r}
-highdrainage <- all.stations %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(station_State) %>% summarise(great_drainage = max(Drainage_A))
-highdrainage
-s.highdrainage <- arrange(highdrainage, desc(great_drainage))
-head(s.highdrainage, 1)
+meanDrainage <- all.stations %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(station_State) %>% summarise(avg_drainage = mean(Drainage_A))
+s.meanDrainage <- arrange(meanDrainage, desc(avg_drainage))
+head(s.meanDrainage, 1)
 ```
 
 ## Questions
@@ -211,31 +210,23 @@ Introduction to Spatial Data Programming with R - Michael Dorman
 <br>
 (https://geobgu.xyz/r/geometric-operations-with-vector-layers.html#introduction-5)
 <br>
--	The order of two inputs (d.stations, del.counties) does not matter because st_intersection returns all intersections of the geometries from x,y inputs.
--	There are some other functions that order does not matter (e.x., st_sym_difference and st_union)
--	Order does not matter because the three functions above are symmetrical
--	Order matters when implementing nonsymmetrical functions such as st_difference. This function is not symmetrical because it returns the area of x, minus the intersection of x and y
+-	The order of two inputs does not matter because st_intersection returns all intersections of the geometries from x,y inputs.(symmetrical)
 <br>
-Therefore, the order matters depend on the function, not depends on the types of data. When implementing st_intersenction, the result will be the same regardless of order.
-
-```{r}
-test1 <- sf::st_intersection(d.stations, del.counties)
-test2 <- sf::st_intersection(del.counties, d.stations)
-test1
-test2
-plot(test1)
-plot(test2)
-```
+However, according to the help function of st_intersection, the returned object will have the same class as of the first argument. Therefore, if x, y have different classes, the output class will be depends on the first argument.
 
 ### 2. What did you find challenging in this lab? What was new?
 <br>
-Question 1.4 - At first, I was trying this code "d.stations %>% mutate(length = min(nchar(STATION_NA)))". However, the output shows that the minimum character count was applied to all counties. So, I searched on the web and found a way to use aggregate, which applies the function to the multiple columns.
+Task 1.4
 <br>
-Task 3 - It was challenging becuase I needed to put multiple functions and if statements all together in one function.
+- At first, I was trying the code "d.stations %>% mutate(length = min(nchar(STATION_NA)))". However, the output shows that the minimum character count was applied to all counties. So, I used aggregate, which find minimum character from the list.
 <br>
-Task 4.1 - I was unable to use st_intersenct because of one geometry in the data. However, I found this code “sf::sf_use_s2(FALSE)” from the web, and the problem was solved. This sf_use_s2 was new to me, and I think I need more explanation about the code in addition to what the web explained: “sf_use_s2 returns the value of this variable before (re)setting it, invisibly if use_s2 is not missing.”
+Task 3
 <br>
-Additional information about sf_use_s2
+- It was challenging because I needed to put "multiple functions" and "if statements" all together in one function.
+<br>
+Task 4.1
+<br>
+- I was unable to use st_intersection because of one geometry in the data. However, I found this code “sf::sf_use_s2(FALSE)” from the web, and the problem was solved. This sf_use_s2 was new to me, but I found the additional information about sf_use_s2
 <br>
 Switching between S2 and GEOS - Edzer Pebesma and Dewey Dunnington
 <br>
@@ -245,4 +236,4 @@ sf_use_s2(FALSE) can switch between s2Geometry and GEOS - Geometry Engine, Open 
 
 ### 3. What types of activities would you like to see in labs this semester?
 <br>
-I would like to do more labs creating animated plot maps with gganimate.
+I would like to do more labs creating animated plot maps with gganimate because animated map can show series of data in easier and more natural way to the users. Also, I think R can create animated map quicker and easier than other programming languages.
