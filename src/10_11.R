@@ -1,0 +1,36 @@
+install.packages("spDataLarge")
+library(sf)
+library(terra)
+library(dplyr)
+library(spData)
+install.packages("spDataLarge", repos = "https://nowosad.github.io/drat/", type = "source")
+library(spDataLarge)
+library(rmapshaper)
+seine_simp = st_simplify(seine, dTolerance = 2000)  # 2000 m
+plot(seine_simp)
+plot(seine)
+us_states2163 = st_transform(us_states, 2163)
+us_states_simp1 = st_simplify(us_states2163, dTolerance = 100000)  # 100 km
+plot(us_states2163)
+plot(us_states_simp1)
+# proportion of points to retain (0-1; default 0.05)
+us_states2163$AREA = as.numeric(us_states2163$AREA)
+us_states_simp2 = rmapshaper::ms_simplify(us_states2163, keep = 0.01,
+                                          keep_shapes = TRUE)
+plot(us_states_simp2)
+nz_centroid = st_centroid(nz)
+seine_centroid = st_centroid(seine)
+plot(nz_centroid)
+plot(seine_centroid)
+nz_sfc = st_geometry(nz)
+nz_shift = nz_sfc + c(0, 100000)
+plot(nz_sfc)
+plot(nz_shift)
+
+
+
+coles = raster::raster("./data/clip_coles.jpg")
+plot(coles)
+coles_disagg = disagg(coles, fact = 10, method = "near")
+coles_agg = aggregate(coles, fact = 10, fun = mean)
+plot(coles_agg)

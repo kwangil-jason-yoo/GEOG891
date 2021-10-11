@@ -71,18 +71,19 @@ bmps1 <- bmps %>% group_by(StateAbbreviation) %>% summarise(tcost = sum(Cost, na
 t.joined3 <- left_join(dams1, bmps1, by = c("STATE" = "StateAbbreviation"))
 filter.dams <- t.joined3 %>% dplyr::filter(YEAR > 1000)
 filter.dams$tcost <- round(filter.dams$tcost, 0)
-filter.dams$DAM_STATE <- paste(DAM_STATE = filter.dams$DAM_NAME,",", filter.dams$STATE, "- Total Cost of BMP: $", filter.dams$tcost)
+filter.dams$DAM_STATE <- paste(DAM_STATE = filter.dams$DAM_NAME,",", filter.dams$STATE, "|| Total Cost of BMP ||")
 
 p4 <- ggplot() + geom_rect(data=filter.dams, aes(xmin=YEAR, xmax=DamRemoval, ymin=DAM_STATE, ymax=DAM_STATE, color=DAM_STATE),size=10) +
-  labs(x= "Year", y="", title = "Service Life of Dams & Cost of BMPs by State") 
+  labs(x= "Year", y="", title = "Service Life of Dams & Cost of BMPs by State")
 
-p4 + geom_label(data = filter.dams, aes(x = YEAR + (DamRemoval-YEAR)/2, y = DAM_STATE, label = paste(DamRemoval-YEAR, "Years"))) + theme(legend.position="none")
+p4 + geom_label(data = filter.dams, aes(x = YEAR + (DamRemoval-YEAR)/2, y = DAM_STATE, label = paste(DamRemoval-YEAR, "Years", "|| $", filter.dams$tcost, "||"))) + theme(legend.position="none") 
 ```
 
 ### Task 2: Spatial operations
 #### 2.1 Find the 5 longest streams in the ‘streams opened by dam removal’ dataset
 ```{r}
-long.streams <- streams %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(GNIS_Name) %>% summarise(totalLength = sum(LengthKM))
+streams <- streams %>% mutate(totalLength = st_length(streams))
+long.streams <- streams %>% as_tibble() %>% group_by(GNIS_Name) %>% summarise(totalLength = sum(totalLength))
 na.long.streams <- na.omit(long.streams)
 s.long.streams <- arrange(na.long.streams, desc(totalLength))
 head(s.long.streams, 5)
@@ -90,8 +91,9 @@ head(s.long.streams, 5)
 
 #### 2.2 Find the three counties with the greatest TOTAL length of streams (opened by dam removal) in them
 ```{r}
+streams <- streams %>% mutate(totalLength = st_length(streams))
 joined <- st_join(streams, counties, join = st_intersects)
-long.joined <- joined %>% as_tibble() %>% dplyr::select(-geometry) %>% group_by(NAME10) %>% summarise(totalLength = sum(LengthKM))
+long.joined <- joined %>% as_tibble() %>% group_by(NAME10) %>% summarise(totalLength = sum(totalLength))
 s.long.streams <- arrange(long.joined, desc(totalLength))
 head(s.long.streams, 3)
 ```
