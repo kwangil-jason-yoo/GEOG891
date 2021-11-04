@@ -127,9 +127,12 @@ Then, sum all the positive and negative values and divide by the sum of observat
 spatially-lagged variable calculate the weighted average values from only neighbors
 
 3. How does your analysis in this lab (as simple as it is) diffr by how you have formalized W (e.g., space, neighbors) in two different methods? How might it affect analysis?
-Queen defines neighbors that shares lines and points
-Rook defines neighbors that shares only lines
-So, when defining neighbors in moran's I calculation, the number of neighbors we consider is different. 
+In global moran's I the neighbors defined by these two methods:
+- Queen defines neighbors that shares lines and points
+- Rook defines neighbors that shares only lines
+So, when defining neighbors in moran's I calculation, we can choose the method based on the purpose and goal.
+
+In IDW, neighbors defined by distance between the observations based on the "near points alike than far points". Centroids should be created and define the neighbors by the distance that user gives.
 
 4. What does it mean if an observation falls in the “H-L” quadrant? Why might it be useful to detect such occurances?
 H-L Quadrant values means that they are high-value has neighboring low-values. If we are using crime data, H-L quadrant means that there is high crime area surrounded by low crime area.
