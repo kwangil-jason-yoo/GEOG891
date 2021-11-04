@@ -1,0 +1,188 @@
+---
+title: "Lab_3_Yoo"
+author: "Kwang il Yoo"
+date: "10/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(sf)
+library(tidyverse)
+library(spdep)
+library(tmap)
+```
+
+
+1. Create a spatial subset of the US, with at AT MINIMUM 4 states, MAXIMUM 7 states. States must be contiguous. Save this subset as a shapefile such that it’s sufficiently small in size that GitHub will accept the git-push
+```{r}
+d.all <- sf::read_sf("../data/County_2010Census_DP1.shp")
+d.all <- d.all %>% mutate(ST = substr(GEOID10, 1, 2))
+states <- dplyr::filter(d.all, ST == "17" | ST == "18" | ST == "19" | ST == "29")
+tmap::tm_shape(states) + tm_polygons()
+st_write(states, "../data/states_filter.shp")
+states.all <- sf::read_sf("../data/states_filter.shp")
+tmap::tm_shape(states.all) + tm_polygons()
+```
+
+2. Choose a variable. If it’s a raw count, you should normalize the variable in an appropriate manner
+(e.g., by total population, percent, by area)
+```{r}
+states.all <- states.all %>% mutate(pct_b = (DP0080004/DP0080001)*100)
+```
+
+3. Make a histogram of your chosen variable
+```{r}
+b <- states.all %>%  as_tibble() %>% dplyr::select(-geometry) %>% group_by(ST) %>% summarise(percent_black = ((sum(DP0080004))/sum(DP0080001))*100)
+ggplot(b) + geom_bar(aes(b$ST, b$percent_black, fill = b$ST), stat = "summary") + ylab("%") + xlab("State")
+
+hist(states.all$pct_b)
+```
+
+4. Make a choropleth map of your chosen variable. Choose an appropriate data classification scheme
+```{r}
+tm_shape(states.all) +
+  tm_polygons(col="pct_b", legend.show=T, breaks=c(0, 0.05, 0.5, 5, 25, 50)) +
+  tm_layout(title= "-Black/African American Population %",
+	title.position= c("right","top"), title.bg.color = "#e5f5f9", title.size = 1)
+```
+
+5. Develop a contiguity-based spatial weights matrix of your choosing (i.e., rook or queen)
+```{r}
+sf::st_crs(states.all)
+states.proj <- states.all %>% sf::st_transform(., "ESRI:102010")
+tmap::tm_shape(states.proj) + tm_polygons()
+states.q <- spdep::poly2nb(states.proj, queen = T)
+states.q[[1]]
+states.proj$NAMELSAD10[1]
+states.q[[1]] %>% states.proj$NAMELSAD10[.]
+```
+
+a. Row-standardize the W
+```{r}
+states.w <- nb2listw(states.q, style="W", zero.policy=TRUE)
+states.w$weights[1]
+```
+
+b. Plot a histogram of the number of neighbors
+```{r}
+neighbors <- attr(states.w$weights, "comp")$d
+hist(neighbors)
+```
+
+c. Calculate the average number of neighbors
+```{r}
+black.pct.lag <- lag.listw(states.w, states.proj$pct_b)
+black.pct.lag
+```
+
+d. Make a Moran Plot
+```{r}
+moran.test(states.proj$pct_b, states.w)
+MC<- moran.mc(states.proj$pct_b, states.w, nsim=999)
+MC
+plot(MC, main="", las=1)
+moran.plot(states.proj$pct_b, states.w, zero.policy=TRUE, plot=TRUE)
+```
+
+6. Repeat #5 (and 5.a - 5.d) above with a W developed using the IDW method. You will need to investigate the spdep documentation to find the correct method/function.
+```{r}
+pts <- st_centroid(states.proj)
+idw_world <- dnearneigh(pts, 0, 50000)
+states.idw <- nb2listwdist(idw_world, pts, type="idw", style="W", alpha = 0, dmax = NULL, longlat = NULL, zero.policy=T)
+idw_world[[1]]
+pts$NAMELSAD10[1]
+idw_world[[1]] %>% pts$NAMELSAD10[.]
+
+states.idw$weights[1]
+
+
+neighbors.idw <- attr(states.idw$weights, "comp")$d
+hist(neighbors.idw)
+
+black.pct.lag.idw <- lag.listw(states.idw, pts$pct_b)
+black.pct.lag.idw
+
+moran.test(pts$pct_b, states.idw)
+MC<- moran.mc(pts$pct_b, states.idw, nsim=999)
+MC
+plot(MC, main="", las=1)
+moran.plot(pts$pct_b, states.idw, zero.policy=TRUE, plot=TRUE)
+```
+
+Questions:
+
+1. Describe in your own words how Moran’s I is calculated
+Moran's I calculated by first defining neighbors and calculating the deviation of each observations' values and neighbors' values. Then multiply them to find the positive or negative correlation. Example:
++1 * +4 = 4 (Positive correlation)
+-1 * -4 = 4 (Positive correlation)
++1 * -4 = -4 (Negative correlation)
+Then, sum all the positive and negative values and divide by the sum of observations' square values to standardize.
+
+
+2. Describe in your own words: what is a spatially-lagged variable?
+spatially-lagged variable calculate the weighted average values from only neighbors
+
+3. How does your analysis in this lab (as simple as it is) diffr by how you have formalized W (e.g., space, neighbors) in two different methods? How might it affect analysis?
+Queen defines neighbors that shares lines and points
+Rook defines neighbors that shares only lines
+So, when defining neighbors in moran's I calculation, the number of neighbors we consider is different. 
+
+4. What does it mean if an observation falls in the “H-L” quadrant? Why might it be useful to detect such occurances?
+H-L Quadrant values means that they are high-value has neighboring low-values. If we are using crime data, H-L quadrant means that there is high crime area surrounded by low crime area.
+
+Bonus (+50 points)
+
+B1. make another Moran plot, this time do so manually (use geom_point from ggplot). You must label each quadrant with HH, HL, LL, and LH, respectively. You should also use color and/or shape to denote whether an observation is statistically significant. Tip, you can find the data you want using the moran.plot function, but you’ll have to alter the function call and read some documentation.
+```{r}
+annotations <- data.frame(
+   xpos = c(-Inf,-Inf,Inf,Inf),
+   ypos =  c(-Inf, Inf,-Inf,Inf),
+   annotateText = c("LL","LH","HL","HH"),
+   hjustvar = c(0,0,1,1) ,
+   vjustvar = c(0,1.0,0,1))
+
+ggplot(states.proj, aes(pct_b, black.pct.lag)) + 
+  geom_point(data=states.proj, aes(x=pct_b, y=black.pct.lag), shape=9) +
+  geom_hline(yintercept=mean(black.pct.lag), lty=2) +
+  geom_vline(xintercept=mean(states.proj$pct_b), lty=2) + theme_minimal() +
+  geom_smooth(inherit.aes = TRUE, method="lm", se=F, col="black") +
+  geom_text(data = annotations, aes(x=xpos,y=ypos,hjust=hjustvar,
+                vjust=vjustvar,label=annotateText))
+
+```
+
+B2. plot a choropleth map of your dataset with a categorical color scheme, where the shading corresponds to the Moran plot (really, “LISA”) quadrants. Thus, your map will have four shades of color.
+```{r}
+local.m <- localmoran(states.proj$pct_b, states.w, zero.policy = T)
+local.m
+quadrant <- vector(mode="numeric",length=nrow(local.m))
+
+# centers the variable of interest around its mean
+m.qualification <- states.proj$pct_b - mean(states.proj$pct_b)     
+
+# centers the local Moran's around the mean
+m.local <- local.m[,1] - mean(local.m[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.qualification >0 & m.local>0] <- 4  
+quadrant[m.qualification <0 & m.local<0] <- 1      
+quadrant[m.qualification <0 & m.local>0] <- 2
+quadrant[m.qualification >0 & m.local<0] <- 3
+quadrant[local.m[,5]>signif] <- 0   
+
+# plot in r
+brks <- c(0,1,2,3,4)
+colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+plot(states.proj$geometry, border="lightgray",col=colors[findInterval(quadrant,brks,all.inside=FALSE)])
+box()
+legend("bottomleft", legend = c("insignificant","low-low","low-high","high-low","high-high"),
+       fill=colors,bty="n")
+```
+
