@@ -1,0 +1,295 @@
+---
+title: "Lab_5_Yoo"
+author: "Kwang il Yoo"
+date: "11/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Required Packages
+library(sf)
+library(tidyverse)
+library(sp)
+library(spdep)
+library(raster)
+library(leaflet)
+library(RColorBrewer)
+```
+
+```{r}
+#Prepare Data
+
+#Lab 2
+#County Shapefile
+counties <- sf::read_sf("../data/CBW/County_Boundaries.shp") %>% sf::st_make_valid()
+#BMP data
+bmps <- read_csv("../data/CBW/BMPreport2016_landbmps.csv")
+
+#Lab 3
+#filtered States
+states.filtered <- sf::read_sf("../data/states_filter.shp")
+
+#Lab 4
+#recent little wabash river shp file
+lwr_new <- sf::read_sf("../data/LWR_Line.shp") %>% sf::st_make_valid()
+#1940 little wabash river shp file
+lwr_1940 <- sf::read_sf("../data/Left 1940.shp") %>% sf::st_make_valid()
+##counties in IL shp file
+IL_co <- sf::read_sf("../data/IL_BNDY_County_Py.shp") %>% sf::st_make_valid()
+#DEM little wabash river
+lwr_ras <- raster::raster("../data/lwr_ras.tif")
+```
+
+#Task 1
+```{r}
+#total cost of BMPs funded by county
+bmps_trim <- bmps %>% mutate(., FIPS.trimmed = stringr::str_sub(GeographyName, 3, 5)) %>% group_by(FIPS.trimmed) %>% summarise(tcost = sum(Cost, na.rm = T))
+#Join with county shp
+counties_bmps <- left_join(counties, bmps_trim, by = c("COUNTYFP10" = "FIPS.trimmed"))
+counties_bmps$tcost <- as.integer(counties_bmps$tcost)
+
+#set basemap variable
+Base_Map <- providers$CartoDB.Positron
+
+#find equal interval breaks
+c.max <- max(counties_bmps$tcost, na.rm = T)
+c.min <- min(counties_bmps$tcost, na.rm = T)
+br <- (c.max - c.min)/5
+start <- 0
+bins <- c()
+for (i in 1:4) {
+    start <- start+br
+    bins <- append(bins, start)
+  } 
+
+
+#set bins and pal variables
+pal <- colorBin(c("#F9E79F", "#7DCEA0", "#17A589", "#2E86C1", "#154360"), domain = counties_bmps$tcost, bins = c(0, bins, Inf), na.color = NA)
+
+#map frame
+base <- leaflet(counties_bmps) %>% 
+      setView(lng = -76.55906218576634, lat = 40.507740442861356, zoom = 6) %>% addProviderTiles(Base_Map, group = "Base_Map")
+
+#Hover Label
+labels <- sprintf(
+  "<strong>%s</strong><br/>$ %s total cost of BMPs",
+  counties_bmps$NAME10, counties_bmps$tcost
+) %>% lapply(htmltools::HTML)
+
+#choropleth map
+base %>%
+      addPolygons(
+        fillColor = ~pal(tcost),
+        weight = 2,
+        opacity = 1,
+        color = "white",
+        fillOpacity = 0.85,
+        label = labels,
+        labelOptions = labelOptions(
+          direction = "bottom",
+          style = list(
+          "color" = "green",
+          "font-family" = "serif",
+          "font-style" = "italic",
+          "box-shadow" = "3px 3px rgba(0,0,0,0.25)",
+          "font-size" = "12px",
+          "border-color" = "rgba(0,0,0,0.5)"
+            )
+          )
+        ) %>%
+      addLegend(
+        pal = pal,
+        values = ~tcost,
+        title = "Total Cost of BMPs by County",
+        position = "bottomright"
+        )
+
+```
+
+#Task 2
+```{r}
+#Moran
+states.filtered <- states.filtered %>% mutate(pct_b = (DP0080004/DP0080001)*100)
+states.proj <- states.filtered %>% sf::st_transform(., "EPSG:4326")
+states.q <- spdep::poly2nb(states.proj, queen = T)
+states.w <- nb2listw(states.q, style="W")
+black.pct.lag <- lag.listw(states.w, states.proj$pct_b)
+
+#Local Moran
+local <- localmoran(x = states.proj$pct_b, listw = states.w)
+quadrant <- vector(mode="numeric",length=nrow(local))
+
+# centers the variable of interest around its mean
+m.qualification <- states.proj$pct_b - mean(states.proj$pct_b)     
+
+# centers the local Moran's around the mean
+m.local <- local[,] - mean(local[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.qualification >0 & m.local>0] <- 4  
+quadrant[m.qualification <0 & m.local<0] <- 1      
+quadrant[m.qualification <0 & m.local>0] <- 2
+quadrant[m.qualification >0 & m.local<0] <- 3
+quadrant[local[,5]>signif] <- 0   
+
+# plot in r
+lisa_col <- c("#F4F6F6", "blue", rgb(0,0,1,alpha=0.4), rgb(1,0,0,alpha=0.4), "red")
+pal <- colorFactor(lisa_col, quadrant)
+
+
+#set popup for p-value
+p <- m.local[,5]
+popup <- sprintf(
+  "p-value: <strong>%g</strong>",
+  p
+) %>% lapply(htmltools::HTML)
+
+#map it
+base_moran <- leaflet(states.proj) %>% 
+      setView(lng = -90.10238038443298, lat = 40.29523658379888, zoom = 6) %>%
+      addProviderTiles(Base_Map, group = "Base_Map") %>%
+      addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+      addProviderTiles(providers$Esri.NatGeoWorldMap, group = "ESRI")
+
+base_moran %>%
+      addPolygons(
+        fillColor = ~pal(quadrant),
+        weight = 0.5,
+        opacity = 1,
+        color = "gray",
+        fillOpacity = 1,
+        popup = popup
+        ) %>%
+      addLegend(
+        colors = lisa_col,
+        values = quadrant,
+        title = "Black, African American Population Clustered",
+        position = "bottomleft",
+        labels = c("insignificant","low-low","low-high","high-low","high-high")
+        ) %>%
+      addLayersControl(
+        baseGroups = c("Base_Map", "Toner", "ESRI"),
+        options = layersControlOptions(collapsed = FALSE))
+
+```
+
+#Task 3
+```{r}
+#clip shapefile
+clip_IL <- dplyr::filter(IL_co, COUNTY_NAM == "COLES" | COUNTY_NAM == "COLES" | COUNTY_NAM == "SHELBY" | COUNTY_NAM == "CUMBERLAND"| COUNTY_NAM == "EFFINGHAM" | COUNTY_NAM == "CLAY" | COUNTY_NAM == "RICHLAND" | COUNTY_NAM == "WAYNE" | COUNTY_NAM == "EDWARDS" | COUNTY_NAM == "WHITE" | COUNTY_NAM == "GALLATIN")
+
+#check coordinate systems
+crs(lwr_new)
+crs(lwr_1940)
+crs(lwr_ras)
+crs(clip_IL)
+#set coordinate system same as IL_co
+st_crs(lwr_new) <- "EPSG:4326"
+lwr_1940<- st_transform(lwr_1940, "EPSG:4326")
+clip_IL <- st_transform(clip_IL, "EPSG:4326")
+
+#Original Raster resolution 3x3 not work because of exceeding max memory use. (resolution set to 30x30 for faster loading time for the assignment)
+#aggregate for less memory use (takes time...)
+#lwr_ras <- raster::aggregate(lwr_ras, 10) <- save as new file
+#writeRaster(lwr_ras, '../data/lwr_ras_agg.tif') <- saved
+lwr_ras_agg <- raster::raster("../data/lwr_ras_agg.tif") #load agregated raster
+
+#pal for ras
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(lwr_ras_agg),
+  na.color = "transparent")
+
+#map it!
+base_lwr <- leaflet(clip_IL) %>% 
+      setView(lng = -88.0551534406064, lat = 38.68125451362618, zoom = 8)%>%
+      addProviderTiles(Base_Map, group = "Base_Map") %>%
+      addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+      addProviderTiles(providers$Esri.NatGeoWorldMap, group = "ESRI")
+
+base_lwr %>%
+      addPolygons(
+        data = clip_IL,
+        color = "gray",
+        weight = 0.5,
+        opacity = 1,
+        group = "counties",
+        label = ~clip_IL$COUNTY_NAM
+      ) %>%
+      addPolylines(
+        data = lwr_new,
+        opacity = 0.5,
+        weight = 1,
+        color = "blue",
+        group = "Stream Current"
+        ) %>%
+      addPolylines(
+        data = lwr_1940,
+        opacity = 0.5,
+        weight = 1,
+        color = "red",
+        group = "Stream 1940"
+        ) %>%
+      addRasterImage(
+        lwr_ras_agg,
+        colors = pal,
+        opacity = 0.8,
+        ) %>%
+      addLegend(
+        values = 1,
+        group = "Stream Current",
+        position = "bottomleft",
+        labels = "Stream Current",
+        colors= "red"
+        ) %>%
+      addLegend(
+        values = 2,
+        group = "Stream 1940",
+        position = "bottomleft",
+        labels = "Stream 1940",
+        colors= "blue"
+        ) %>%
+      addEasyButton(easyButton(
+        icon="fa-globe", title="Zoom to Level 1",
+        onClick=JS("function(btn, map){ map.setView([39.707181,-100.546875],4); }"))
+        ) %>%
+      addEasyButton(easyButton(
+        icon="fa-home", title="Home",
+        onClick=JS("function(btn, map){map.setView([38.68125451362618,-88.0551534406064],8); }"))
+        ) %>%
+      addEasyButton(easyButton(
+        icon=htmltools::span(class = "1", htmltools::HTML("&#10112;")), title="Sector 1",
+        onClick=JS("function(btn, map){map.setView([39.327924,-88.519805],10); }"))
+        ) %>%
+      addEasyButton(easyButton(
+        icon=htmltools::span(class = "2", htmltools::HTML("&#10113;")), title="Sector 2",
+        onClick=JS("function(btn, map){map.setView([38.610432,-88.324585],10); }"))
+        ) %>%
+      addEasyButton(easyButton(
+        icon=htmltools::span(class = "3", htmltools::HTML("&#10114;")), title="Sector 3",
+        onClick=JS("function(btn, map){map.setView([38.028622,-88.181763],10); }"))
+        ) %>%
+      addLayersControl(
+        baseGroups = c("Base_Map", "Toner", "ESRI"),
+        overlayGroups = c("counties", "Stream Current", "Stream 1940"),
+        options = layersControlOptions(collapsed = FALSE)) %>%
+      addMeasure()
+```
+
+#1. Reflect on the labs from this semester. What did you learn? What did you like? What did you not
+like?
+
+I like labs that have two parts. Such as lab 4, following the basic steps to make sure that I learned all the things that I need to have to create my own things. Those labs made me check whether I understood the contents correctly. Also, I was able to see whether I could apply those functions to my own project or custom creations.
+
+Furthermore, I liked the bonus questions, not because of extra points but because there is a way to stretch my skills and knowledge without having pressure from getting full points.
+
+I personally think that we should have more labs.
+
+#2. Describe the “one thing” you chose to add to your map in Task 3 above. What did you do, and why
+is it applicable to your map?
+I added bookmark buttons to my map. Earth icon zoom out to US level so people can view the location of the study area. The home icon fits the extent of the study area. Icon 1, 2, 3 show the different sectors with a closer look. I think these bookmark buttons are very useful because my map needs to be zoomed in to view the detailed changes of the Little Wabash River.
