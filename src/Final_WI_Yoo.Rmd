@@ -1,0 +1,313 @@
+---
+title: "Final_WI_Yoo"
+author: "Kwang il Yoo"
+date: "12/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install packages
+##install.packages("broom")
+##install.packages("car")
+##install.packages("stargazer")
+##install.packages("spatialreg")
+##install.packages(sf)
+##install.packages(tidyverse)
+##install.packages(spdep)
+##install.packages(jsonlite)
+##install.packages(tmap)
+##install.packages(tmaptools)
+
+# Load packages
+library(sf)
+library(tidyverse)
+library(spdep)
+library(jsonlite)
+library(tmap)
+library(tmaptools)
+library(broom)
+library(car)
+library(spatialreg)
+library(knitr)
+library(stargazer)
+```
+
+```{r}
+#Getting groceries
+patterns <- read.csv(file = "../data/Final_Project/patterns_WI.csv")
+zip <- c(53704, 53711, 53703, 53590, 53719, 53562, 53705, 53593, 53713, 53716, 53589, 53597, 53718, 53714, 53575, 53532, 53717, 53534, 53558, 53715, 53572, 53527, 53555, 53528, 53583, 53726, 53523, 53559, 53508, 53594, 53531, 53598, 53560, 53521, 53515, 53529, 53517, 53744, 53708, 53725, 53701, 53779, 53707, 53571, 53706, 53596, 53702, 53777, 53774, 53778, 53783, 53782, 53785, 53784, 53788, 53786, 53790, 53789, 53792, 53791, 53794, 53793)
+groceries <- c("Woodman's Market", "ALDI", "Pick 'n Save", "Hy-Vee", "Trader Joe's", "Whole Foods Market")
+patterns_zip <- patterns %>% filter(postal_code %in% zip)
+patterns_gro <- patterns_zip %>% filter(location_name %in% groceries)
+```
+
+```{r}
+#JSON to CSV - Getting visitors for each groceries
+ParseJSONColumn <- function(x)  {
+  str_c("[ ", str_c(x, collapse = ",", sep=" "), " ]")  %>% 
+    fromJSON(flatten = T) %>% 
+    as.tibble()
+}
+
+data <- patterns_gro  %>% 
+  mutate(DataSplit = "locations") 
+
+JSONcolumn_data <- data  %>% 
+  select(visitor_home_aggregation)  %>% 
+  map_dfc(.f = ParseJSONColumn)
+
+JSONcolumn_data  %>% 
+  head(n = 5)
+
+full_data_wJSON <- bind_cols(data,JSONcolumn_data)
+
+write.csv(full_data_wJSON, file = "../data/Final_Project/groceries_WI.csv")
+```
+
+```{r}
+#data prep
+Grocery <- read.csv(file = "../data/Final_Project/groceries_WI_edit.csv")
+
+dane_acs <- read.csv(file = "../data/Final_Project/dane_acs.csv")
+dane <-  sf::read_sf("../data/Final_Project/dane.shp") %>% sf::st_make_valid()
+
+dane_ACS <- dplyr::left_join(dane, dane_acs, by='GISJOIN')
+dane_ACS <- dane_ACS %>% mutate(GEOID.x = as.numeric(GEOID.x))
+Grocery <- Grocery %>% mutate(location_name = as.numeric(location_name))
+dane_join <- dplyr::left_join(dane_ACS, Grocery, by=c("GEOID.x" = "location_name"), all.x = T)
+```
+
+```{r}
+#SES
+#reclassification
+max <- max(dane_join$ALW1E001, na.rm=T)
+min <- min(dane_join$ALW1E001, na.rm=T)
+br <- (max - min)/5
+start <- 0
+bins <- c()
+for (i in 1:4) {
+    start <- start+br
+    bins <- append(bins, start)
+} 
+#Median House hold Income
+(dane_join <- dane_join %>%
+    mutate(MHI = case_when(
+      ALW1E001 <= 34500 ~ "5",
+      ALW1E001 <= 69000 ~ "4",
+      ALW1E001 <= 79000 ~ "3",
+      ALW1E001 <= 117937.5~ "2",
+      ALW1E001 <= 156875 ~ "1",
+    )))
+#Occupation
+dane_join <- dane_join %>% mutate(workHome = ALY6E004+ALY6E007+ALY6E011+ALY6E040+ALY6E043+ALY6E047)
+dane_join <- dane_join %>% mutate(workOnsite = ALY6E016+ALY6E019+ALY6E027+ALY6E030+ALY6E034+ALY6E052+ALY6E055+ALY6E063+ALY6E066+ALY6E070)
+dane_join <- dane_join %>% mutate(OccIndex = workHome/workOnsite)
+(dane_join <- dane_join %>%
+    mutate(Occ = case_when(
+      OccIndex <= 0.789 ~ "5",
+      OccIndex <= 1.579 ~ "4",
+      OccIndex <= 2.367 ~ "3",
+      OccIndex <= 3.156 ~ "2",
+      OccIndex <= 4.15 ~ "1",
+    )))
+#Education
+dane_join <- dane_join %>% mutate(high_school_less = ALWGE002+ALWGE003+ALWGE004+ALWGE005+ALWGE007+ALWGE008+ALWGE009+ALWGE010+ALWGE011+ALWGE012+ALWGE013+ALWGE014+ALWGE015+ALWGE016+ALWGE017+ALWGE018+ALWGE019+ALWGE020)
+dane_join <- dane_join %>% mutate(Associate = ALWGE021)
+dane_join <- dane_join %>% mutate(Bachelor = ALWGE022)
+dane_join <- dane_join %>% mutate(Master = (ALWGE023 + ALWGE024))
+dane_join <- dane_join %>% mutate(Doctorate = ALWGE025)
+dane_join <- dane_join %>% mutate(Edu = (Bachelor+Master+Doctorate)/ALUBE001)
+(dane_join <- dane_join %>%
+    mutate(Edu_class = case_when(
+      Edu <= 0.123 ~ "5",
+      Edu <= 0.246 ~ "4",
+      Edu <= 0.369 ~ "3",
+      Edu <= 0.492 ~ "2",
+      Edu <= 0.615 ~ "1",
+    )))
+
+dane_join <- dane_join %>% mutate(SES = as.numeric(Edu_class)+as.numeric(Occ)+as.numeric(MHI))
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "MHI", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "Edu_class", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "Occ", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "SES", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Food access frequency
+dane_join$ALUBE001 <- as.numeric(dane_join$ALUBE001)
+dane_join$Total <- as.numeric(dane_join$Total)
+
+dane_join <- dane_join %>% mutate(FAF = Total/ALUBE001)
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "FAF", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Public transportation use
+dane_join$ALUBE001[is.na(dane_join$ALU1E010)] <- 0
+dane_join$Total[is.na(dane_join$ALU1E001)] <- 0
+
+dane_join <- dane_join %>% mutate(PTU = ALU1E010/ALUBE001)
+
+tm_shape(dane_join, unit = "mi") +
+  tm_polygons(col = "PTU", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#COVID
+covid <- read.csv(file = "../data/Final_Project/COVID19-Historical-V2-TRCT_1.csv")
+covid <- covid %>% group_by(GEOID) %>% summarise(POS_CONF = sum(POS_CONF))
+
+covid$GEOID <- as.numeric(covid$GEOID)
+dane_join <- dplyr::left_join(dane_join, covid, by=c("GEOID.x" = "GEOID"), all.x = T)
+dane_join_cov <- dane_join %>% mutate(Case_rates = POS_CONF/ALUBE001)
+
+tm_shape(dane_join_cov, unit = "mi") +
+  tm_polygons(col = "Case_rates", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Spatial Regression
+fit.ols <- lm(Case_rates ~ PTU + FAF + SES, data = dane_join_cov)
+
+summary(fit.ols)
+
+tidy(fit.ols)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.ols))) +
+  xlab("OLS residuals")
+
+qqPlot(fit.ols)
+
+plot(resid(fit.ols))
+
+dane_join_cov <- subset(dane_join_cov, TRACTCE!="991703")
+dane_join_cov <- subset(dane_join_cov, TRACTCE!="991702")
+res <- read.csv(file = "../data/Final_Project/res.csv")
+dane_join_cov <- dane_join_cov %>% mutate(olsresid = res$res)
+
+tm_shape(dane_join_cov, unit = "mi") +
+  tm_polygons(col = "olsresid", style = "equal",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "Residuals from linear regression in Dane Tracts",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Moran Plot & LISA Map
+daneb<-poly2nb(dane_join_cov, queen=T)
+danew<-nb2listw(daneb, style="W", zero.policy = TRUE)
+moran.plot(dane_join_cov$olsresid, listw=danew, xlab="Standardized", ylab="Neighbors Standardized",
+main=c("Moran Scatterplot") )
+moran.mc(dane_join_cov$olsresid, danew, nsim=999)
+lm.morantest(fit.ols, danew)
+
+
+local.m <- localmoran(dane_join_cov$olsresid, danew, zero.policy = T)
+quadrant <- vector(mode="numeric",length=nrow(local.m))
+
+# centers the variable of interest around its mean
+m.qualification <- dane_join_cov$olsresid - mean(dane_join_cov$olsresid)     
+
+# centers the local Moran's around the mean
+m.local <- local.m[,1] - mean(local.m[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.qualification >0 & m.local>0] <- 4  
+quadrant[m.qualification <0 & m.local<0] <- 1      
+quadrant[m.qualification <0 & m.local>0] <- 2
+quadrant[m.qualification >0 & m.local<0] <- 3
+quadrant[local.m[,5]>signif] <- 0   
+
+# plot in r
+brks <- c(0,1,2,3,4)
+colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+plot(dane_join_cov$geometry, border="lightgray",col=colors[findInterval(quadrant,brks,all.inside=FALSE)])
+box()
+legend("bottomleft", legend = c("insignificant","low-low","low-high","high-low","high-high"),
+       fill=colors,bty="n")
+```
+
+```{r}
+#Spatial lag model
+fit.lag<-lagsarlm(Case_rates ~ PTU + FAF + SES, data = dane_join_cov, listw = danew)
+summary(fit.lag)
+
+tidy(fit.lag)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.lag))) +
+  xlab("OLS residuals")
+
+#qqPlot(fit.lag)
+
+plot(resid(fit.lag))
+```
+
+
+```{r}
+#Spatial error model
+fit.err<-errorsarlm(Case_rates ~ PTU + FAF + SES, data = dane_join_cov, listw = danew)
+summary(fit.err)
+
+tidy(fit.err)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.err))) +
+  xlab("OLS residuals")
+
+#qqPlot(fit.err)
+
+plot(resid(fit.err))
+```
+
+```{r}
+summary(fit.ols)
+fit.ols %>% 
+  tidy() %>%
+  kable(digits = 3)
+```
+
+```{r}
+AICs<-c(AIC(fit.lag), AIC(fit.err))
+labels<-c("SLM","SEM" )
+
+kable(data.frame(Models=labels, AIC=round(AICs, 2)))
+
+LM <- lm.LMtests(fit.ols, danew, test = "all")
+LM
+t <- sacsarlm(formula = Case_rates ~ PTU + FAF + SES, data = dane_join_cov, danew, zero.policy = T)
+t
+```
+

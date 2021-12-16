@@ -1,0 +1,144 @@
+---
+title: "Final_Yoo"
+author: "Kwang il Yoo"
+date: "11/15/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load packages
+library(sf)
+library(tidyverse)
+library(spdep)
+library(jsonlite)
+library(tmap)
+library(tmaptools)
+```
+
+```{r}
+#Getting groceries
+patterns <- read.csv(file = "../data/Final_Project/patterns.csv")
+zip <- c(68301, 68317, 68017, 68333, 68336, 68339, 68347, 68358, 68366, 68368, 68372, 68502, 68503, 68504, 68505, 68506, 68507, 68508, 68510, 68512, 68514, 68516, 68517, 68520, 68521, 68522, 68523, 68524, 68526, 68527, 68528, 68531, 68532, 68402, 68404, 68419, 68428, 68430, 68438, 68065, 68461, 68462)
+groceries <- c("Super Saver", "ALDI", "Walmart Supercenter", "Russ's Market", "Hy-Vee", "Trader Joe's", "Whole Foods Market")
+patterns_zip <- patterns %>% filter(postal_code %in% zip)
+patterns_gro <- patterns_zip %>% filter(location_name %in% groceries)
+```
+
+```{r}
+#JSON to CSV - Getting visitors for each groceries
+ParseJSONColumn <- function(x)  {
+  str_c("[ ", str_c(x, collapse = ",", sep=" "), " ]")  %>% 
+    fromJSON(flatten = T) %>% 
+    as.tibble()
+}
+
+data <- patterns_gro  %>% 
+  mutate(DataSplit = "locations") 
+
+JSONcolumn_data <- data  %>% 
+  select(visitor_home_aggregation)  %>% 
+  map_dfc(.f = ParseJSONColumn)
+
+JSONcolumn_data  %>% 
+  head(n = 5)
+
+full_data_wJSON <- bind_cols(data,JSONcolumn_data)
+
+write.csv(full_data_wJSON, file = "../data/Final_Project/groceries.csv")
+```
+
+```{r}
+#data prep
+US <-  sf::read_sf("../data/Final_Project/US_tract_2019.shp") %>% sf::st_make_valid()
+ACS <- read.csv(file = "../data/Final_Project/ACS2019.csv")
+Grocery <- read.csv(file = "../data/Final_Project/groceries.csv")
+Lancaster <- dplyr::filter(US, STATEFP == "31" & COUNTYFP == "109")
+ 
+Lancaster_ACS <- dplyr::left_join(Lancaster, ACS, by='GISJOIN')
+Lancaster_ACS <- Lancaster_ACS %>% mutate(GEOID.x = as.numeric(GEOID.x))
+Lan_join <- dplyr::left_join(Lancaster_ACS, Grocery, by=c("GEOID.x" = "location_name"), all.x = T)
+```
+
+```{r}
+#SES
+#reclassification
+#Median House hold Income
+(Lan_join <- Lan_join %>%
+    mutate(MHI = case_when(
+      ALW1E001 < 44370.2 ~ "1",
+      ALW1E001 < 66657.4 ~ "2",
+      ALW1E001 < 88944.6 ~ "3",
+      ALW1E001 < 111231.8 ~ "4",
+      ALW1E001 < 133519 ~ "5",
+    )))
+#Occupation
+Lan_join <- Lan_join %>% mutate(workHome = ALY6E004+ALY6E007+ALY6E011+ALY6E040+ALY6E043+ALY6E047)
+Lan_join <- Lan_join %>% mutate(workRemote = ALY6E016+ALY6E019+ALY6E027+ALY6E030+ALY6E034+ALY6E052+ALY6E055+ALY6E063+ALY6E066+ALY6E070)
+Lan_join <- Lan_join %>% mutate(OccIndex = workHome/workRemote)
+(Lan_join <- Lan_join %>%
+    mutate(Occ = case_when(
+      OccIndex < 0.51280116 ~ "1",
+      OccIndex < 0.83641312 ~ "2",
+      OccIndex < 1.16002508 ~ "3",
+      OccIndex < 1.48363704 ~ "4",
+      OccIndex < 1.807249 ~ "5",
+    )))
+#Education
+Lan_join <- Lan_join %>% mutate(high_school_less = ALWGE002+ALWGE003+ALWGE004+ALWGE005+ALWGE007+ALWGE008+ALWGE009+ALWGE010+ALWGE011+ALWGE012+ALWGE013+ALWGE014+ALWGE015+ALWGE016+ALWGE017+ALWGE018+ALWGE019+ALWGE020)
+Lan_join <- Lan_join %>% mutate(Associate = ALWGE021*2)
+Lan_join <- Lan_join %>% mutate(Bachelor = ALWGE022*3)
+Lan_join <- Lan_join %>% mutate(Master = (ALWGE023 + ALWGE024)*4)
+Lan_join <- Lan_join %>% mutate(Doctorate = ALWGE025*5)
+Lan_join <- Lan_join %>% mutate(Edu = high_school_less+Associate+Bachelor+Master+Doctorate)
+(Lan_join <- Lan_join %>%
+    mutate(Edu_class = case_when(
+      Edu < 2827 ~ "1",
+      Edu < 5639 ~ "2",
+      Edu < 8451 ~ "3",
+      Edu < 11263 ~ "4",
+      Edu < 14075 ~ "5",
+    )))
+
+Lan_join$MHI[is.na(Lan_join$MHI)] <- 0
+Lan_join$Occ[is.na(Lan_join$Occ)] <- 0
+Lan_join$Edu_class[is.na(Lan_join$Edu_class)] <- 0
+
+Lan_join <- Lan_join %>% mutate(SES = as.numeric(Edu_class)+as.numeric(Occ)+as.numeric(MHI))
+
+tm_shape(Lan_join) +
+  tm_polygons(col="SES", legend.show=T, breaks = c(0, 3, 6, 9, 12, 15)) +
+  tm_layout(title= "SES",
+    title.position= c("right","top"), title.bg.color = "#e5f5f9", title.size = 1)
+```
+
+```{r}
+#Food access frequency
+Lan_join$ALUBE001 <- as.numeric(Lan_join$ALUBE001)
+Lan_join$Total <- as.numeric(Lan_join$Total)
+
+Lan_join$ALUBE001[is.na(Lan_join$ALUBE001)] <- 0
+Lan_join$Total[is.na(Lan_join$Total)] <- 0
+
+Lan_join <- Lan_join %>% mutate(FAF = Total/ALUBE001)
+```
+
+```{r}
+#Public transportation use
+Lan_join$ALUBE001[is.na(Lan_join$ALU1E010)] <- 0
+Lan_join$Total[is.na(Lan_join$ALU1E001)] <- 0
+
+Lan_join <- Lan_join %>% mutate(PTU = ALU1E010/ALU1E001)
+```
+
+```{r}
+#Spatial Regression
+```
+
+```{r}
+#Moran Plot & LISA Map
+```
+

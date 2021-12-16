@@ -132,6 +132,8 @@ m.local <- local[,] - mean(local[,1])
 # significance threshold
 signif <- 0.1 
 
+##mydata <- moran.plot() this will make dataframe for the moran including p values
+
 # builds a data quadrant
 quadrant[m.qualification >0 & m.local>0] <- 4  
 quadrant[m.qualification <0 & m.local<0] <- 1      

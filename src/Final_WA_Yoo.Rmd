@@ -1,0 +1,328 @@
+---
+title: "Final_WA_Yoo"
+author: "Kwang il Yoo"
+date: "12/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install packages
+##install.packages("broom")
+##install.packages("car")
+##install.packages("stargazer")
+##install.packages("spatialreg")
+##install.packages(sf)
+##install.packages(tidyverse)
+##install.packages(spdep)
+##install.packages(jsonlite)
+##install.packages(tmap)
+##install.packages(tmaptools)
+# Load packages
+library(sf)
+library(tidyverse)
+library(spdep)
+library(jsonlite)
+library(tmap)
+library(tmaptools)
+library(broom)
+library(car)
+library(spatialreg)
+library(knitr)
+library(stargazer)
+```
+
+```{r}
+#Getting groceries
+patterns_WA <- read.csv(file = "../data/Final_Project/patterns_WA.csv")
+zip_WA <- c(98052, 98103, 98115, 98122, 98133, 98109, 98034, 98125, 98004, 98003, 98105, 98118, 98033, 98023, 98042, 98102, 98092, 98058, 98107, 98121, 98198, 98056, 98032, 98059, 98117, 98002, 98155, 98006, 98116, 98144, 98031, 98119, 98168, 98038, 98027, 98030, 98007, 98101, 98029, 98011, 98001, 98146, 98112, 98040, 98106, 98072, 98126, 98104, 98074, 98188, 98008, 98022, 98055, 98028, 98199, 98178, 98166, 98005, 98108, 98075, 98053, 98177, 98136, 98057, 98045, 98065, 98070, 98019, 98077, 98148, 98354, 98014, 98010, 98047, 98251, 98024, 98051, 98039, 98093, 98071, 98009, 98083, 98073, 98063, 98064, 98041, 98015, 98138, 98111, 98127, 98165, 98145, 98035, 98124, 98062, 98025, 98050, 98139, 98113, 98175, 98013, 98134, 98114, 98288, 98164, 98194, 98089, 98224, 98160, 98141, 98054, 98131, 98129, 98132, 98151, 98154, 98158, 98161, 98170, 98174, 98171, 98181, 98185, 98184, 98190, 98191, 98195, 98471, 98481)
+groceries_WA <- c("Grocery Outlet", "Ballard Town & Country Market", "QFC (Quality Food Centers)", "Safeway", "WinCo Foods", "Whole Foods Market", "Trader Joe's", "Fred Meyer", "Albertsons")
+patterns_zip_WA <- patterns_WA %>% filter(postal_code %in% zip_WA)
+patterns_gro_WA <- patterns_zip_WA %>% filter(location_name %in% groceries_WA)
+```
+
+```{r}
+#JSON to CSV - Getting visitors for each groceries
+ParseJSONColumn <- function(x)  {
+  str_c("[ ", str_c(x, collapse = ",", sep=" "), " ]")  %>% 
+    fromJSON(flatten = T) %>% 
+    as.tibble()
+}
+
+data_WA <- patterns_gro_WA  %>% 
+  mutate(DataSplit = "locations") 
+
+JSONcolumn_data_WA <- data_WA  %>% 
+  select(visitor_home_aggregation)  %>% 
+  map_dfc(.f = ParseJSONColumn)
+
+JSONcolumn_data_WA  %>% 
+  head(n = 5)
+
+full_data_wJSON_WA <- bind_cols(data_WA,JSONcolumn_data_WA)
+
+write.csv(full_data_wJSON_WA, file = "../data/Final_Project/groceries_WA.csv")
+```
+
+```{r}
+#data prep
+Grocery_WA <- read.csv(file = "../data/Final_Project/groceries_WA_edit.csv")
+king_acs <- read.csv(file = "../data/Final_Project/king_acs.csv")
+king <-  sf::read_sf("../data/Final_Project/king.shp") %>% sf::st_make_valid()
+
+king_ACS <- dplyr::left_join(king, king_acs, by='GISJOIN')
+king_ACS <- king_ACS %>% mutate(GEOID.x = as.numeric(GEOID.x))
+Grocery_WA <- Grocery_WA %>% mutate(location_name = as.numeric(location_name))
+king_join <- dplyr::left_join(king_ACS, Grocery_WA, by=c("GEOID.x" = "location_name"), all.x = T)
+```
+
+```{r}
+#SES
+#reclassification
+max <- max(king_join$ALW1E001, na.rm=T)
+min <- min(king_join$ALW1E001, na.rm=T)
+br <- (max - min)/5
+start <- 0
+bins <- c()
+for (i in 1:4) {
+    start <- start+br
+    bins <- append(bins, start)
+} 
+#Median House hold Income
+(king_join <- king_join %>%
+    mutate(MHI = case_when(
+      ALW1E001 < 45000 ~ "5",
+      ALW1E001 < 90000 ~ "4",
+      ALW1E001 < 100000 ~ "3",
+      ALW1E001 < 175000 ~ "2",
+      ALW1E001 <= 250001 ~ "1",
+    )))
+#Occupation
+king_join <- king_join %>% mutate(workHome = ALY6E004+ALY6E007+ALY6E011+ALY6E040+ALY6E043+ALY6E047)
+king_join <- king_join %>% mutate(workOnsite = ALY6E016+ALY6E019+ALY6E027+ALY6E030+ALY6E034+ALY6E052+ALY6E055+ALY6E063+ALY6E066+ALY6E070)
+king_join <- king_join %>% mutate(OccIndex = workHome/workOnsite)
+(king_join <- king_join %>%
+    mutate(Occ = case_when(
+      OccIndex < 0.728 ~ "5",
+      OccIndex < 1.456 ~ "4",
+      OccIndex < 2.185 ~ "3",
+      OccIndex < 2.913 ~ "2",
+      OccIndex <= 3.694 ~ "1",
+    )))
+#Education
+king_join <- king_join %>% mutate(high_school_less = ALWGE002+ALWGE003+ALWGE004+ALWGE005+ALWGE007+ALWGE008+ALWGE009+ALWGE010+ALWGE011+ALWGE012+ALWGE013+ALWGE014+ALWGE015+ALWGE016+ALWGE017+ALWGE018+ALWGE019+ALWGE020)
+king_join <- king_join %>% mutate(Associate = ALWGE021)
+king_join <- king_join %>% mutate(Bachelor = ALWGE022)
+king_join <- king_join %>% mutate(Master = (ALWGE023 + ALWGE024))
+king_join <- king_join %>% mutate(Doctorate = ALWGE025)
+king_join <- king_join %>% mutate(Edu = (Bachelor+Master+Doctorate)/ALUBE001)
+(king_join <- king_join %>%
+    mutate(Edu_class = case_when(
+      Edu < 0.146 ~ "5",
+      Edu < 0.291 ~ "4",
+      Edu < 0.437 ~ "3",
+      Edu < 0.582 ~ "2",
+      Edu <= 075. ~ "1",
+    )))
+
+king_join <- king_join %>% mutate(SES = as.numeric(Edu_class)+as.numeric(Occ)+as.numeric(MHI))
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "MHI",style = "quantile", palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "Edu_class", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "Occ", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "SES", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Food access frequency
+king_join$ALUBE001 <- as.numeric(king_join$ALUBE001)
+king_join$Total <- as.numeric(king_join$Total)
+
+king_join <- king_join %>% mutate(FAF = Total/ALUBE001)
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "FAF", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Public transportation use
+king_join$ALUBE001[is.na(king_join$ALU1E010)] <- 0
+king_join$Total[is.na(king_join$ALU1E001)] <- 0
+
+king_join <- king_join %>% mutate(PTU = ALU1E010/ALU1E001)
+
+tm_shape(king_join, unit = "mi") +
+  tm_polygons(col = "PTU", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#COVID
+covid_WA <- read.csv(file = "../data/Final_Project/covid_case_seattle.csv")
+covid_WA <- covid_WA %>% group_by(ï..Census) %>% summarise(Confirmed_Case_Rate = sum(Confirmed_Case_Rate))
+
+covid_WA$ï..Census <- as.numeric(covid_WA$ï..Census)
+king_join_cov <- dplyr::left_join(king_join, covid_WA, by=c("GEOID.x" = "ï..Census"), all.x = T)
+
+tm_shape(king_join_cov, unit = "mi") +
+  tm_polygons(col = "Confirmed_Case_Rate", style = "quantile",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Spatial Regression
+fit.ols_WA <- lm(Confirmed_Case_Rate ~ PTU + FAF + SES, data = king_join_cov)
+
+summary(fit.ols_WA)
+
+tidy(fit.ols_WA)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.ols_WA))) +
+  xlab("OLS residuals")
+
+qqPlot(fit.ols_WA)
+
+plot(resid(fit.ols_WA))
+
+res_WA <- read.csv(file = "../data/Final_Project/res_WA.csv")
+king_join_cov <- king_join_cov %>% mutate(olsresid = res_WA$ï..res)
+
+tm_shape(king_join_cov, unit = "mi") +
+  tm_polygons(col = "olsresid", style = "equal",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "Residuals from linear regression in Dane Tracts",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Moran Plot & LISA Map
+set.ZeroPolicyOption(TRUE)
+kingb <-poly2nb(king_join_cov, queen=T)
+kingw <-nb2listw(kingb, style="W", zero.policy = T)
+moran.plot(king_join_cov$olsresid, listw=kingw, xlab="Standardized", ylab="Neighbors Standardized",
+main=c("Moran Scatterplot") )
+moran.mc(king_join_cov$olsresid, kingw, nsim=999)
+lm.morantest(fit.ols_WA, kingw, zero.policy = T)
+
+local.m <- localmoran(king_join_cov$olsresid, kingw, zero.policy = T)
+local.m
+quadrant <- vector(mode="numeric",length=nrow(local.m))
+
+# centers the variable of interest around its mean
+m.qualification <- king_join_cov$olsresid - mean(king_join_cov$olsresid)     
+
+# centers the local Moran's around the mean
+m.local <- local.m[,1] - mean(local.m[,1])    
+
+# significance threshold
+signif <- 0.1 
+
+# builds a data quadrant
+quadrant[m.qualification >0 & m.local>0] <- 4  
+quadrant[m.qualification <0 & m.local<0] <- 1      
+quadrant[m.qualification <0 & m.local>0] <- 2
+quadrant[m.qualification >0 & m.local<0] <- 3
+quadrant[local.m[,5]>signif] <- 0   
+
+# plot in r
+brks <- c(0,1,2,3,4)
+colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+plot(king_join_cov$geometry, border="lightgray",col=colors[findInterval(quadrant,brks,all.inside=FALSE)])
+box()
+legend("bottomleft", legend = c("insignificant","low-low","low-high","high-low","high-high"),
+       fill=colors,bty="n")
+```
+```{r}
+#Spatial lag model
+set.ZeroPolicyOption(TRUE)
+fit.lag_WA<-lagsarlm(Confirmed_Case_Rate ~ PTU + FAF + SES, data = king_join_cov, listw = kingw, zero.policy = T)
+summary(fit.lag_WA)
+
+tidy(fit.lag_WA)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.lag_WA))) +
+  xlab("OLS residuals")
+
+#qqPlot(fit.lag_WA)
+
+plot(resid(fit.lag_WA))
+
+res_WA <- read.csv(file = "../data/Final_Project/res_WA.csv")
+king_join_cov <- king_join_cov %>% mutate(olsresid = res_WA$ï..res)
+
+tm_shape(king_join_cov, unit = "mi") +
+  tm_polygons(col = "olsresid", style = "equal",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "Residuals from linear regression in Dane Tracts",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+```{r}
+#Spatial error model
+set.ZeroPolicyOption(TRUE)
+fit.err_WA<-errorsarlm(Confirmed_Case_Rate ~ PTU + FAF + SES, data = king_join_cov, listw = kingw, zero.policy = T)
+summary(fit.err_WA)
+
+tidy(fit.err_WA)
+
+ggplot() + 
+  geom_histogram(mapping = aes(x=resid(fit.err_WA))) +
+  xlab("OLS residuals")
+
+#qqPlot(fit.lag_WA)
+
+plot(resid(fit.err_WA))
+
+res_WA <- read.csv(file = "../data/Final_Project/res_WA.csv")
+king_join_cov <- king_join_cov %>% mutate(olsresid = res_WA$ï..res)
+
+tm_shape(king_join_cov, unit = "mi") +
+  tm_polygons(col = "olsresid", style = "equal",palette = "Reds", title = "") +
+  tm_scale_bar(breaks = c(0, 2, 4), text.size = 1, position = c("right", "bottom")) +
+  tm_layout(main.title = "Residuals from linear regression in Dane Tracts",  main.title.size = 0.95, frame = FALSE, legend.outside = TRUE, attr.outside = TRUE)
+```
+
+
+```{r}
+summary(fit.ols_WA)
+fit.ols_WA %>% 
+  tidy() %>%
+  kable(digits = 3)
+stargazer(fit.ols_WA, fit.lag_WA, fit.err_WA, type = "html",
+                    title="Title: Regression Results")
+```
+
+```{r}
+AICs_wa<-c(AIC(fit.lag_WA), AIC(fit.err_WA))
+labels<-c("SLM","SEM" )
+
+kable(data.frame(Models=labels, AIC=round(AICs_wa, 2)))
+
+LM <- lm.LMtests(fit.ols_WA, kingw, test = "all", zero.policy = T)
+LM
+t <- sacsarlm(formula = Confirmed_Case_Rate ~ PTU + FAF + SES, data = king_join_cov, kingw, zero.policy = T)
+t
+```
+
